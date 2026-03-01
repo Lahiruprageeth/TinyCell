@@ -1,0 +1,23 @@
+{
+    "name": "TinyCell",
+    "version": "0.1.0",
+    "description": "Quectel-based cellular modem support (EG800K etc.) for Arduino/PlatformIO",
+    "keywords": [
+        "cellular",
+        "quectel",
+        "modem",
+        "EG800K"
+    ],
+    "repository": {
+        "type": "git",
+        "url": "https://example.com/your-repo.git"
+    },
+    "frameworks": [
+        "arduino"
+    ],
+    "platforms": [
+        "espressif32",
+        "espressif8266"
+    ],
+    "dependencies": []
+}

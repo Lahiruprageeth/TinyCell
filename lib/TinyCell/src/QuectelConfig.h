@@ -1,0 +1,4 @@
+#pragma once
+#define QUECTEL_RX_BUFFER 2048
+#define QUECTEL_AT_TIMEOUT 2000
+#define QUECTEL_SSL_CONTEXT 1
