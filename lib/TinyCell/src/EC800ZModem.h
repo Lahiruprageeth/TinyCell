@@ -3,52 +3,62 @@
 #include "QuectelModemBase.h"
 
 class EC800ZModem : public QuectelModemBase {
- public:
+public:
   // construct with existing AT helper
-  EC800ZModem(QuectelAT& at);
+  EC800ZModem(QuectelAT &at);
   // convenience constructor that takes a Stream and builds its own QuectelAT
-  EC800ZModem(Stream& serial);
+  EC800ZModem(Stream &serial);
   ~EC800ZModem();
 
   bool attachNetwork() override;
-  bool activatePDP(const char* apn) override;
+  bool activatePDP(const char *apn) override;
 
-  bool openSocket(const char* host, uint16_t port) override;
-  bool openSSLSocket(const char* host, uint16_t port) override;
+  bool openSocket(const char *host, uint16_t port) override;
+  bool openSSLSocket(const char *host, uint16_t port) override;
+  void restart() override;
+  int getSignalQuality() override;
+  String getIMEI() override;
+  String getIMSI() override;
+  String getCCID() override;
 
   // Optional SSL certificate setters
-  void setRootCA(const char* ca);
-  void setClientCert(const char* cert, const char* key);
+  void setRootCA(const char *ca);
+  void setClientCert(const char *cert, const char *key);
 
-  int send(const uint8_t* data, size_t len) override;
+  int send(const uint8_t *data, size_t len) override;
   int available() override;
-  int receive(uint8_t* buffer, size_t len) override;
+  int receive(uint8_t *buffer, size_t len) override;
   void closeSocket() override;
   uint8_t connected() override;
-  void setDebug(Stream& dbg) override;
+  void setDebug(Stream &dbg) override;
 
   // AT helper wrappers
-  bool sendAT(const char* fmt, ...) override;
-  int waitResponse(const char* r1 = "OK\r\n", const char* r2 = "ERROR\r\n",
-                   const char* r3 = "", const char* r4 = "",
-                   const char* r5 = "") override;
+  bool sendAT(const char *fmt, ...) override;
+  int waitResponse(const char *r1 = "OK\r\n", const char *r2 = "ERROR\r\n",
+                   const char *r3 = "", const char *r4 = "",
+                   const char *r5 = "") override;
 
   // SMS / voice helpers
-  bool sendSMS(const char* to, const char* text);
-  bool dial(const char* number);
+  bool sendSMS(const char *to, const char *text);
+  bool dial(const char *number);
   bool answer();
   void hangup();
 
- private:
-  QuectelAT* _at;
+private:
+  QuectelAT *_at;
   bool _ownsAt = false;
   bool _socketConnected = false;
 
   // pointers to certificates for SSL sockets
-  const char* _rootCA = nullptr;
-  const char* _clientCert = nullptr;
-  const char* _clientKey = nullptr;
+  const char *_rootCA = nullptr;
+  const char *_clientCert = nullptr;
+  const char *_clientKey = nullptr;
 
-  // Simple buffer to avoid losing bytes between available() and receive() calls
+  // RX Buffering to reduce AT command overhead
+  static const uint16_t RX_BUFFER_SIZE = 256;
+  uint8_t _rxBuffer[RX_BUFFER_SIZE];
+  uint16_t _rxBufferPos = 0;
+  uint16_t _rxBufferLen = 0;
+
   uint16_t _cachedAvailable = 0;
 };

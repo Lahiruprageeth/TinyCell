@@ -1,108 +1,141 @@
-#define MODEM_EC800Z  // select modem type (see TinyCell.h for options)
+#define MODEM_EC800Z // select modem type (see TinyCell.h for options)
 
 #include <PubSubClient.h>
 #include <TinyCell.h>
 
 // ----------------- PIN CONFIG ----------------
-#define MODEM_TX 32
-#define MODEM_RX 33
+#define MODEM_TX 27
+#define MODEM_RX 26
 
 // Hardware Serial
 #define SerialAT Serial2
 
-// --- AWS IoT Core settings (replace with your own endpoint and certs) ---
-const char* awsEndpoint = "your-iot-endpoint.amazonaws.com";
-const int awsPort = 8883;
-const char* mqttTopic = "gps/tracker/data";
-const char* mqttClientID = "esp32-gps-tracker";
+// LED Pin
+#define LED_PIN 17
 
-// Example certificates (PEM format). In a real sketch you'd store these in
-// PROGMEM or load from filesystem; they're shortened here for brevity.
-const char awsRootCA[] PROGMEM = "-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----";
-const char awsClientCert[] PROGMEM = "-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----";
-const char awsClientKey[] PROGMEM = "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----";
+// --- ThingsBoard Settings ---
+const char *mqttServer = "mqtt.thingsboard.cloud";
+const int mqttPort = 1883;
+const char *mqttTopic = "v1/devices/me/telemetry";
+const char *mqttToken = "tzNQG1X4iM9B3mvggBGC"; // Your Access Token
 
 TinyCell modem(SerialAT);
-QuectelClientSecure secureClient(modem);
-PubSubClient mqtt(secureClient);  // secure connection for MQTT
+QuectelClient mqttClient(modem);
+PubSubClient mqtt(mqttClient);
+
+String uniqueClientID;
+
 // forward declarations
 void mqttConnect();
-void mqttCallback(char* topic, byte* payload, unsigned int len);
+void mqttCallback(char *topic, byte *payload, unsigned int len);
+
 void setup() {
   Serial.begin(115200);
-  // optional: echo AT traffic to monitor for debugging
-  // define SerialMon if you prefer a separate serial port, otherwise use
-  // normal Serial.  e.g. `#define SerialMon Serial` earlier in sketch.
-  modem.setDebug(Serial);  // or SerialMon
-  // Initialize quctel eg800k
-  SerialAT.begin(9600, SERIAL_8N1, MODEM_RX, MODEM_TX);
+  delay(1000);
+  Serial.println("\n--- TinyCell Startup (ThingsBoard) ---");
+
+  modem.setDebug(Serial);
+  SerialAT.begin(115200, SERIAL_8N1, MODEM_RX, MODEM_TX);
   delay(3000);
-modem.sendAT("AT+csq");  // set response format to include line breaks for easier parsing
-delay(3000);
-modem.sendAT("AT+csq");  // set response format to include line breaks for easier parsing
-modem.sendAT("AT+CREG?");  // set response format to include line breaks for easier parsing
-  // quick library sanity check: attach network + PDP
-  Serial.println("Checking modem...");
+
+  // Turn off local echo to reduce serial buffer noise
+  modem.sendAT("ATE0");
+
+  Serial.println("Reading Modem Info...");
+  String imei = modem.getIMEI();
+  if (imei.length() == 0) {
+    Serial.println("System: Failed to read IMEI. Retrying logic...");
+    // Try again or use a fallback
+    imei = "860000000000000";
+  }
+  Serial.print("  IMEI: ");
+  Serial.println(imei);
+  Serial.print("  IMSI: ");
+  Serial.println(modem.getIMSI());
+  Serial.print("  ICCID: ");
+  Serial.println(modem.getCCID());
+  Serial.print("  Signal: ");
+  Serial.println(modem.getSignalQuality());
+
+  // Use IMEI to create a unique ClientID
+  uniqueClientID = "TinyCell_" + imei;
+
   if (!modem.attachNetwork()) {
-    Serial.println("Failed to attach to network");
-    delay(5000);
+    Serial.println("System: Network attachment failed!");
     return;
   }
-  Serial.println("Attached to network");
+  Serial.println("System: Network attached.");
 
-  if (!modem.activatePDP("your_apn_here")) {
-    Serial.println("Failed to activate PDP");
-    delay(5000);
+  if (!modem.activatePDP("internet")) {
+    Serial.println("System: PDP Context Activation failed!");
     return;
   }
-  Serial.println("PDP activated");
+  Serial.println("System: PDP Context Activated.");
 
-  // configure SSL certificates and open secure socket
-  modem.setRootCA(awsRootCA);
-  modem.setClientCert(awsClientCert, awsClientKey);
-  if (!modem.openSSLSocket(awsEndpoint, awsPort)) {
-    Serial.println("SSL socket failed");
-    delay(5000);
-    return;
-  }
-  Serial.println("SSL socket open");
-
-  mqtt.setServer(awsEndpoint, awsPort);
+  // Setup MQTT
+  mqtt.setServer(mqttServer, mqttPort);
   mqtt.setCallback(mqttCallback);
+
+  pinMode(LED_PIN, OUTPUT);
+  Serial.println("System: Setup Complete. Ready to connect MQTT.");
 }
 
 void loop() {
-  // Maintain MQTT connection
   if (!mqtt.connected()) {
     mqttConnect();
   }
   mqtt.loop();
-}
-void mqttConnect() {
-  Serial.print("Connecting to MQTT: ");
-  Serial.println(awsEndpoint);
 
-  // Connect to AWS IoT Core (no username/password required)
-  if (mqtt.connect(mqttClientID)) {
-    Serial.println("MQTT connected");
-    // mqtt.subscribe("gps/tracker/commands");
+  // Send telemetry every 15 seconds
+  static unsigned long lastTelemetry = 0;
+  if (millis() - lastTelemetry >= 15000) {
+    lastTelemetry = millis();
+    if (mqtt.connected()) {
+      Serial.println(">>> Sending Telemetry to ThingsBoard...");
+      // Strictly valid flat JSON for ThingsBoard
+      bool ok = mqtt.publish(mqttTopic, "{\"temperature\":25}");
+      if (ok) {
+        Serial.println(">>> Publish SUCCESS");
+      } else {
+        Serial.println(">>> Publish FAILED (Check broker state)");
+      }
+    }
+  }
+
+  static unsigned long lastBlink = 0;
+  if (millis() - lastBlink >= 1000) {
+    lastBlink = millis();
+    digitalWrite(LED_PIN, !digitalRead(LED_PIN));
+  }
+}
+
+void mqttConnect() {
+  Serial.print("MQTT: Connecting to ");
+  Serial.println(mqttServer);
+
+  // For ThingsBoard:
+  // Client ID = uniqueClientID (IMEI-based)
+  // Username = Token
+  // Password = NULL
+  mqtt.setKeepAlive(60);
+
+  if (mqtt.connect(uniqueClientID.c_str(), mqttToken, NULL)) {
+    Serial.println("MQTT: Connected Successfully!");
+    mqtt.subscribe(mqttTopic);
   } else {
-    Serial.print("MQTT failed, rc=");
+    Serial.print("MQTT: Connect Failed, rc=");
     Serial.print(mqtt.state());
-    Serial.println(" retrying in 5 seconds");
+    Serial.println(". (Check Token). Retrying in 5s...");
     delay(5000);
   }
 }
-void mqttCallback(char* topic, byte* payload, unsigned int len) {
-  // Handle incoming MQTT messages
-  Serial.print("Message received on topic: ");
-  Serial.println(topic);
 
-  String message;
+void mqttCallback(char *topic, byte *payload, unsigned int len) {
+  Serial.print("Message [");
+  Serial.print(topic);
+  Serial.print("]: ");
   for (unsigned int i = 0; i < len; i++) {
-    message += (char)payload[i];
+    Serial.print((char)payload[i]);
   }
-
-  Serial.print("Message: ");
-  Serial.println(message);
+  Serial.println();
 }

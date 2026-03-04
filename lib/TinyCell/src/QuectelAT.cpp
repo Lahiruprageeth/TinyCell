@@ -1,49 +1,61 @@
 #include "QuectelAT.h"
 
-QuectelAT::QuectelAT(Stream& serial) : _serial(&serial) {}
+QuectelAT::QuectelAT(Stream &serial)
+    : _serial(&serial), _debugAtStartOfLine(true), _recvUrcSeen(false) {}
 
-void QuectelAT::setDebug(Stream& dbg) {
-  _debug = &dbg;
-}
+void QuectelAT::setDebug(Stream &dbg) { _debug = &dbg; }
 
-bool QuectelAT::sendCommand(const String& cmd) {
+bool QuectelAT::sendCommand(const String &cmd) {
   if (_debug) {
     _debug->print("AT> ");
     _debug->println(cmd);
+    _debugAtStartOfLine = true;
   }
-  streamClear();
   streamWrite(cmd.c_str());
   streamWrite("\r\n");
   return true;
 }
 
-bool QuectelAT::sendCommand(const char* cmd) {
+bool QuectelAT::sendCommand(const char *cmd) {
   if (_debug) {
     _debug->print("AT> ");
     _debug->println(cmd);
+    _debugAtStartOfLine = true;
   }
-  streamClear();
   streamWrite(cmd);
   streamWrite("\r\n");
   return true;
 }
 
-void QuectelAT::streamWrite(const char* s) { _serial->print(s); }
+void QuectelAT::streamWrite(const char *s) { _serial->print(s); }
 
-void QuectelAT::streamWrite(const uint8_t* buf, size_t size) {
+void QuectelAT::streamWrite(const uint8_t *buf, size_t size) {
   _serial->write(buf, size);
 }
 
-int QuectelAT::streamRead() { return _serial->read(); }
+int QuectelAT::streamRead() {
+  int c = _serial->read();
+  if (c != -1 && _debug) {
+    if (_debugAtStartOfLine && c != '\r' && c != '\n') {
+      _debug->print("RD< ");
+      _debugAtStartOfLine = false;
+    }
+    _debug->print((char)c);
+    if (c == '\n')
+      _debugAtStartOfLine = true;
+  }
+  return c;
+}
 
 void QuectelAT::streamClear() {
-  while (_serial->available()) {
+  uint32_t start = millis();
+  while (_serial->available() && (millis() - start < 100)) {
     _serial->read();
   }
 }
 
-int QuectelAT::waitResponse(uint32_t timeout_ms, const char* r1, const char* r2,
-                            const char* r3, const char* r4, const char* r5) {
+int QuectelAT::waitResponse(uint32_t timeout_ms, const char *r1, const char *r2,
+                            const char *r3, const char *r4, const char *r5) {
   String data;
   String s1 = r1 ? String(r1) : String();
   String s2 = r2 ? String(r2) : String();
@@ -53,7 +65,7 @@ int QuectelAT::waitResponse(uint32_t timeout_ms, const char* r1, const char* r2,
   return waitResponse(timeout_ms, data, s1, s2, s3, s4, s5);
 }
 
-int QuectelAT::waitResponse(uint32_t timeout_ms, String& data, String r1,
+int QuectelAT::waitResponse(uint32_t timeout_ms, String &data, String r1,
                             String r2, String r3, String r4, String r5) {
   data.reserve(64);
   uint32_t startMillis = millis();
@@ -61,13 +73,15 @@ int QuectelAT::waitResponse(uint32_t timeout_ms, String& data, String r1,
 
   while (millis() - startMillis < timeout_ms) {
     while (_serial->available() > 0) {
-      char c = _serial->read();
-      if (_debug) {
-        _debug->print(c);
-      }
+      char c = streamRead();
       data += c;
 
-            if (r1.length() && data.endsWith(r1)) {
+      // Detect URCs inside the stream
+      if (data.endsWith("+QIURC: \"recv\"")) {
+        _recvUrcSeen = true;
+      }
+
+      if (r1.length() && data.endsWith(r1)) {
         index = 1;
         goto finish;
       }
@@ -88,7 +102,7 @@ int QuectelAT::waitResponse(uint32_t timeout_ms, String& data, String r1,
         goto finish;
       }
     }
-    delay(1);  // yield to prevent watchdog timeouts
+    delay(1);
   }
 
 finish:
@@ -96,7 +110,17 @@ finish:
 }
 
 void QuectelAT::processURC() {
-  // We will expand this if the modem asynchronously spews '+QIURC: "recv",...'
-  // Usually these are handled when we read from the stream while waiting for
-  // responses.
+  // Read whatever is in the buffer to check for asynchronous notifications
+  static String urcBuffer;
+  while (_serial->available() > 0) {
+    char c = streamRead();
+    urcBuffer += c;
+    if (urcBuffer.endsWith("+QIURC: \"recv\"")) {
+      _recvUrcSeen = true;
+    }
+    if (c == '\n')
+      urcBuffer = "";
+    if (urcBuffer.length() > 64)
+      urcBuffer = "";
+  }
 }
