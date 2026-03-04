@@ -3,10 +3,12 @@
 QuectelAT::QuectelAT(Stream &serial)
     : _serial(&serial), _debugAtStartOfLine(true), _recvUrcSeen(false) {}
 
-void QuectelAT::setDebug(Stream &dbg) { _debug = &dbg; }
+void QuectelAT::setDebug(Stream *dbg) { _debug = dbg; }
 
 bool QuectelAT::sendCommand(const String &cmd) {
-  if (_debug) {
+  if (_debug && !_silent) {
+    if (!_debugAtStartOfLine)
+      _debug->println();
     _debug->print("AT> ");
     _debug->println(cmd);
     _debugAtStartOfLine = true;
@@ -17,7 +19,9 @@ bool QuectelAT::sendCommand(const String &cmd) {
 }
 
 bool QuectelAT::sendCommand(const char *cmd) {
-  if (_debug) {
+  if (_debug && !_silent) {
+    if (!_debugAtStartOfLine)
+      _debug->println();
     _debug->print("AT> ");
     _debug->println(cmd);
     _debugAtStartOfLine = true;
@@ -35,12 +39,12 @@ void QuectelAT::streamWrite(const uint8_t *buf, size_t size) {
 
 int QuectelAT::streamRead() {
   int c = _serial->read();
-  if (c != -1 && _debug) {
-    if (_debugAtStartOfLine && c != '\r' && c != '\n') {
+  if (c != -1 && _debug && !_silent) {
+    if (_debugAtStartOfLine) {
       _debug->print("RD< ");
       _debugAtStartOfLine = false;
     }
-    _debug->print((char)c);
+    _debug->write((uint8_t)c);
     if (c == '\n')
       _debugAtStartOfLine = true;
   }
@@ -79,6 +83,12 @@ int QuectelAT::waitResponse(uint32_t timeout_ms, String &data, String r1,
       // Detect URCs inside the stream
       if (data.endsWith("+QIURC: \"recv\"")) {
         _recvUrcSeen = true;
+      }
+
+      // Safety: if the response buffer grows too large, clear older data
+      // but keep enough to match typical responses (e.g. 128 bytes)
+      if (data.length() > 256) {
+        data = data.substring(data.length() - 128);
       }
 
       if (r1.length() && data.endsWith(r1)) {

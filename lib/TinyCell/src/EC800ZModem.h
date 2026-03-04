@@ -22,15 +22,16 @@ public:
   String getCCID() override;
 
   // Optional SSL certificate setters
-  void setRootCA(const char *ca);
-  void setClientCert(const char *cert, const char *key);
+  void setRootCA(const char *ca) override;
+  void setClientCert(const char *cert, const char *key) override;
 
   int send(const uint8_t *data, size_t len) override;
   int available() override;
   int receive(uint8_t *buffer, size_t len) override;
   void closeSocket() override;
   uint8_t connected() override;
-  void setDebug(Stream &dbg) override;
+  void processURC() override;
+  void setDebug(Stream *dbg) override;
 
   // AT helper wrappers
   bool sendAT(const char *fmt, ...) override;
@@ -55,7 +56,7 @@ private:
   const char *_clientKey = nullptr;
 
   // RX Buffering to reduce AT command overhead
-  static const uint16_t RX_BUFFER_SIZE = 256;
+  static const uint16_t RX_BUFFER_SIZE = 1024;
   uint8_t _rxBuffer[RX_BUFFER_SIZE];
   uint16_t _rxBufferPos = 0;
   uint16_t _rxBufferLen = 0;

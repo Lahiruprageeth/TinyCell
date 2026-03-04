@@ -10,16 +10,22 @@ int QuectelClient::connect(IPAddress ip, uint16_t port) {
 
 int QuectelClient::connect(const char *host, uint16_t port) {
   _peekByte = -1;
+  _modem->processURC(); // Add processURC() before attempting connection
   return _modem->openSocket(host, port) ? 1 : 0;
 }
 
-size_t QuectelClient::write(uint8_t b) { return _modem->send(&b, 1); }
+size_t QuectelClient::write(uint8_t b) {
+  _modem->processURC(); // Add processURC() before writing
+  return _modem->send(&b, 1);
+}
 
 size_t QuectelClient::write(const uint8_t *buf, size_t size) {
+  _modem->processURC(); // Add processURC() before writing
   return _modem->send(buf, size);
 }
 
 int QuectelClient::available() {
+  _modem->processURC(); // Pump URCs
   int avail = _modem->available();
   if (_peekByte != -1) {
     avail++;

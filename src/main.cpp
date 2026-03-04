@@ -1,5 +1,6 @@
 #define MODEM_EC800Z // select modem type (see TinyCell.h for options)
 
+#include <ArduinoHttpClient.h>
 #include <PubSubClient.h>
 #include <TinyCell.h>
 
@@ -11,7 +12,7 @@
 #define SerialAT Serial2
 
 // LED Pin
-#define LED_PIN 17
+#define LED_PIN 2
 
 // --- ThingsBoard Settings ---
 const char *mqttServer = "mqtt.thingsboard.cloud";
@@ -28,13 +29,14 @@ String uniqueClientID;
 // forward declarations
 void mqttConnect();
 void mqttCallback(char *topic, byte *payload, unsigned int len);
+void gettest();
 
 void setup() {
   Serial.begin(115200);
   delay(1000);
   Serial.println("\n--- TinyCell Startup (ThingsBoard) ---");
 
-  modem.setDebug(Serial);
+  //modem.setDebug(&Serial);
   SerialAT.begin(115200, SERIAL_8N1, MODEM_RX, MODEM_TX);
   delay(3000);
 
@@ -45,7 +47,6 @@ void setup() {
   String imei = modem.getIMEI();
   if (imei.length() == 0) {
     Serial.println("System: Failed to read IMEI. Retrying logic...");
-    // Try again or use a fallback
     imei = "860000000000000";
   }
   Serial.print("  IMEI: ");
@@ -57,7 +58,6 @@ void setup() {
   Serial.print("  Signal: ");
   Serial.println(modem.getSignalQuality());
 
-  // Use IMEI to create a unique ClientID
   uniqueClientID = "TinyCell_" + imei;
 
   if (!modem.attachNetwork()) {
@@ -72,12 +72,14 @@ void setup() {
   }
   Serial.println("System: PDP Context Activated.");
 
-  // Setup MQTT
   mqtt.setServer(mqttServer, mqttPort);
   mqtt.setCallback(mqttCallback);
 
   pinMode(LED_PIN, OUTPUT);
   Serial.println("System: Setup Complete. Ready to connect MQTT.");
+
+  // Run the ArduinoHttpClient test
+ // gettest();
 }
 
 void loop() {
@@ -86,18 +88,16 @@ void loop() {
   }
   mqtt.loop();
 
-  // Send telemetry every 15 seconds
   static unsigned long lastTelemetry = 0;
   if (millis() - lastTelemetry >= 15000) {
     lastTelemetry = millis();
     if (mqtt.connected()) {
       Serial.println(">>> Sending Telemetry to ThingsBoard...");
-      // Strictly valid flat JSON for ThingsBoard
       bool ok = mqtt.publish(mqttTopic, "{\"temperature\":25}");
       if (ok) {
         Serial.println(">>> Publish SUCCESS");
       } else {
-        Serial.println(">>> Publish FAILED (Check broker state)");
+        Serial.println(">>> Publish FAILED");
       }
     }
   }
@@ -110,22 +110,11 @@ void loop() {
 }
 
 void mqttConnect() {
-  Serial.print("MQTT: Connecting to ");
-  Serial.println(mqttServer);
-
-  // For ThingsBoard:
-  // Client ID = uniqueClientID (IMEI-based)
-  // Username = Token
-  // Password = NULL
-  mqtt.setKeepAlive(60);
-
   if (mqtt.connect(uniqueClientID.c_str(), mqttToken, NULL)) {
     Serial.println("MQTT: Connected Successfully!");
     mqtt.subscribe(mqttTopic);
   } else {
-    Serial.print("MQTT: Connect Failed, rc=");
-    Serial.print(mqtt.state());
-    Serial.println(". (Check Token). Retrying in 5s...");
+    Serial.print("MQTT: Connect Failed. Retrying in 5s...");
     delay(5000);
   }
 }
@@ -138,4 +127,51 @@ void mqttCallback(char *topic, byte *payload, unsigned int len) {
     Serial.print((char)payload[i]);
   }
   Serial.println();
+}
+
+void gettest() {
+  const char *host = "iott.mypressonline.com";
+  const char *path = "/magicos.bin";
+  int port = 80;
+
+  Serial.println("\n--- Starting ArduinoHttpClient GET Request ---");
+
+  // Silence AT logs during transfer for cleaner output
+  modem.setDebug(nullptr);
+
+  QuectelClient qClient(modem);
+  HttpClient http(qClient, host, port);
+
+  int err = http.get(path);
+  if (err == 0) {
+    int statusCode = http.responseStatusCode();
+    Serial.print("HTTP Status Code: ");
+    Serial.println(statusCode);
+
+    // Skip headers and read body
+    // Using streaming read because 1.9MB is too large for RAM
+    Serial.println("Reading Body:");
+    unsigned long timeout = millis();
+    uint32_t totalRead = 0;
+
+    while (http.connected() || http.available()) {
+      if (http.available()) {
+        char c = http.read();
+        Serial.print(c);
+        totalRead++;
+        timeout = millis();
+      }
+      if (millis() - timeout > 10000) {
+        Serial.println("\nHTTP Timeout!");
+        break;
+      }
+    }
+    Serial.printf("\n--- HTTP Request Finished. Read %u bytes ---\n",
+                  totalRead);
+  } else {
+    Serial.print("HTTP Client GET failed: ");
+    Serial.println(err);
+  }
+
+  modem.setDebug(&Serial); // Re-enable debug
 }

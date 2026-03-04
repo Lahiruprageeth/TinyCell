@@ -6,7 +6,7 @@ public:
   QuectelAT(Stream &serial);
 
   // enable printing of AT traffic to a debug stream (e.g. Serial)
-  void setDebug(Stream &dbg);
+  void setDebug(Stream *dbg);
 
   // High-level AT command execution
   bool sendCommand(const String &cmd);
@@ -38,10 +38,15 @@ public:
   bool isRecvUrcSeen() { return _recvUrcSeen; }
   void clearRecvUrc() { _recvUrcSeen = false; }
 
+  // Silent mode for background polling
+  void setSilent(bool silent) { _silent = silent; }
+  bool isSilent() { return _silent; }
+
 private:
   Stream *_serial;
   Stream *_debug = nullptr;
   bool _recvUrcSeen = false;
+  bool _silent = false;
 
   // Internal helper to match strings progressively
   int8_t matchString(const String &str, const String &match, uint16_t offset);

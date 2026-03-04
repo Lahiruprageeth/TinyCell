@@ -14,14 +14,19 @@ public:
   virtual String getIMSI() = 0;
   virtual String getCCID() = 0;
 
+  virtual void setCCID(String ccid) {} // optional setter
+  virtual void setRootCA(const char *ca) {}
+  virtual void setClientCert(const char *cert, const char *key) {}
+
   // enable debug output from the underlying AT layer
-  virtual void setDebug(Stream &dbg) {}
+  virtual void setDebug(Stream *dbg) {}
 
   virtual int send(const uint8_t *data, size_t len) = 0;
   virtual int available() = 0;
   virtual int receive(uint8_t *buffer, size_t len) = 0;
   virtual void closeSocket() = 0;
   virtual uint8_t connected() = 0;
+  virtual void processURC() = 0;
 
   // Convenience AT/IO helpers used by higher-level clients (secure client)
   // Send a formatted AT command (printf-style). Implementations should
