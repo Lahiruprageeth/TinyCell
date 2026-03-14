@@ -1,177 +1,109 @@
-#define MODEM_EC800Z // select modem type (see TinyCell.h for options)
+#define MODEM_EC800Z // select modem type
 
 #include <ArduinoHttpClient.h>
-#include <PubSubClient.h>
-#include <TinyCell.h>
+#include <LPCell.h>
 
-// ----------------- PIN CONFIG ----------------
+// ----------------- CONFIG ----------------
 #define MODEM_TX 27
 #define MODEM_RX 26
-
-// Hardware Serial
 #define SerialAT Serial2
 
-// LED Pin
-#define LED_PIN 2
+// --- SSL/TLS CERTIFICATES ---
+// Amazon Root CA 1 (Used by JSONPlaceholder/AWS)
+const char *root_ca =
+    "-----BEGIN CERTIFICATE-----\n"
+    "MIIDQTCCAimgAwIBAgITBmyfz5m/jAo54vB4ikPmljZbyjANBgkqhkiG9w0BAQsF\n"
+    "ADA5MQswCQYDVQQGEwJVUzEPMA0GA1UEChMGQW1hem9uMRkwFwYDVQQDEwxBbWF6\n"
+    "b24gUm9vdCBDQSAxMB4XDTE1MDUyNjAwMDAwMFoXDTM4MDExNzAwMDAwMFowOTEL\n"
+    "MAkGA1UEBhMCVVMxDzANBgNVBAoTBkFtYXpvbjEZMBcGA1UEAxMQQW1hem9uIFJv\n"
+    "b3QgQ0EgMTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBALJ4gHHKeNXj\n"
+    "ca9HgFB0fW7Y14h29Jlo91ghYPl0hAEvrAIthtOgQ3pOsqTQNroBvo3bSMgHFzZM\n"
+    "9O6II8c+6zf1tRn4SWiw3te5djgdYZ6k/oI2peVKVuRF4fn9tBb6dNqcmzU5L/qw\n"
+    "IFAGbHrQgLKm+a/sRxmPUDgH3KKHOVj4utWp+UhnMJbulHheb4mjUcAwhmahRWa6\n"
+    "VOujw5H5SNz/0egwLX0tdHA114gk957EWW67c4cX8jJGKLhD+rcdqsq08p8kDi1L\n"
+    "93FcXmn/6pUCyziKrlA4b9v7LWIbxcceVOF34GfID5yHI9Y/QCB/IIDEgEw+OyQm\n"
+    "jgSubJrIqg0CAwEAAaNCMEAwDwYDVR0TAQH/BAUwAwEB/zAOBgNVHQ4EFgEFIQYz\n"
+    "IU07LwMlJQuCFmcx7IQTgoIMA0GCSqGSIb3DQEBCwUAA4IBAQCY8jdaQZChGsV2\n"
+    "USggNiMOruYou6r4lK5IpDB/G/wkjUu0yKGX9rbxenDIU5PMCCjjmCXPI6T53iHT\n"
+    "fIUJrU6adTrCC2qJeHZERxhlbI1Bjjt/msv0tadQ1wUsN+gDS63pYaACbvXy8MWy\n"
+    "7Vu33PqUXHeeE6V/Uq2V8viTO96LXFvKWlJbYK8U90vvo/ufQJVtMVT8QtPHRh8j\n"
+    "rdkPSHCa2XV4cdFyQzR1bldZwgJcJmApzyMZFo6IQ6XU5MsI+yMRQ+hDKXJioald\n"
+    "XgjUkK642M4UwtBV8ob2xJNDd2ZhwLnoQdeXeGADbkpyrqXRfboQnoZsG4q5WTP4\n"
+    "68SQvvG5\n"
+    "-----END CERTIFICATE-----";
 
-// --- ThingsBoard Settings ---
-const char *mqttServer = "mqtt.thingsboard.cloud";
-const int mqttPort = 1883;
-const char *mqttTopic = "v1/devices/me/telemetry";
-const char *mqttToken = "tzNQG1X4iM9B3mvggBGC"; // Your Access Token
+LPCell modem(SerialAT);
+QuectelClientSecure tcSecureClient(modem);
 
-TinyCell modem(SerialAT);
-QuectelClient mqttClient(modem);
-PubSubClient mqtt(mqttClient);
-
-String uniqueClientID;
-
-// forward declarations
-void mqttConnect();
-void mqttCallback(char *topic, byte *payload, unsigned int len);
-void gettest();
+// Forward declaration
+void performHTTPSGet();
 
 void setup() {
   Serial.begin(115200);
   delay(1000);
-  Serial.println("\n--- TinyCell Startup (ThingsBoard) ---");
+  Serial.println("\n--- LPCell: HTTPS GET (JSONPlaceholder) ---");
 
-  //modem.setDebug(&Serial);
   SerialAT.begin(115200, SERIAL_8N1, MODEM_RX, MODEM_TX);
   delay(3000);
 
-  // Turn off local echo to reduce serial buffer noise
-  modem.sendAT("ATE0");
+  // Enable AT logging
+  modem.setDebug(&Serial);
 
-  Serial.println("Reading Modem Info...");
-  String imei = modem.getIMEI();
-  if (imei.length() == 0) {
-    Serial.println("System: Failed to read IMEI. Retrying logic...");
-    imei = "860000000000000";
-  }
-  Serial.print("  IMEI: ");
-  Serial.println(imei);
-  Serial.print("  IMSI: ");
-  Serial.println(modem.getIMSI());
-  Serial.print("  ICCID: ");
-  Serial.println(modem.getCCID());
-  Serial.print("  Signal: ");
-  Serial.println(modem.getSignalQuality());
+  // Set the Root CA for verification
+  tcSecureClient.setCACert(root_ca);
 
-  uniqueClientID = "TinyCell_" + imei;
+  Serial.println("System: Attaching network...");
+  if (modem.attachNetwork()) {
+    Serial.println("System: Activating PDP Context...");
+    if (modem.activatePDP("internet")) {
+      Serial.println("System: PDP Context active.");
 
-  if (!modem.attachNetwork()) {
-    Serial.println("System: Network attachment failed!");
-    return;
-  }
-  Serial.println("System: Network attached.");
-
-  if (!modem.activatePDP("internet")) {
-    Serial.println("System: PDP Context Activation failed!");
-    return;
-  }
-  Serial.println("System: PDP Context Activated.");
-
-  mqtt.setServer(mqttServer, mqttPort);
-  mqtt.setCallback(mqttCallback);
-
-  pinMode(LED_PIN, OUTPUT);
-  Serial.println("System: Setup Complete. Ready to connect MQTT.");
-
-  // Run the ArduinoHttpClient test
- // gettest();
-}
-
-void loop() {
-  if (!mqtt.connected()) {
-    mqttConnect();
-  }
-  mqtt.loop();
-
-  static unsigned long lastTelemetry = 0;
-  if (millis() - lastTelemetry >= 15000) {
-    lastTelemetry = millis();
-    if (mqtt.connected()) {
-      Serial.println(">>> Sending Telemetry to ThingsBoard...");
-      bool ok = mqtt.publish(mqttTopic, "{\"temperature\":25}");
-      if (ok) {
-        Serial.println(">>> Publish SUCCESS");
-      } else {
-        Serial.println(">>> Publish FAILED");
-      }
+      // Perform HTTPS GET
+      performHTTPSGet();
     }
   }
-
-  static unsigned long lastBlink = 0;
-  if (millis() - lastBlink >= 1000) {
-    lastBlink = millis();
-    digitalWrite(LED_PIN, !digitalRead(LED_PIN));
-  }
 }
 
-void mqttConnect() {
-  if (mqtt.connect(uniqueClientID.c_str(), mqttToken, NULL)) {
-    Serial.println("MQTT: Connected Successfully!");
-    mqtt.subscribe(mqttTopic);
-  } else {
-    Serial.print("MQTT: Connect Failed. Retrying in 5s...");
-    delay(5000);
-  }
-}
+void performHTTPSGet() {
+  const char *host = "jsonplaceholder.typicode.com";
+  const int port = 443;
 
-void mqttCallback(char *topic, byte *payload, unsigned int len) {
-  Serial.print("Message [");
-  Serial.print(topic);
-  Serial.print("]: ");
-  for (unsigned int i = 0; i < len; i++) {
-    Serial.print((char)payload[i]);
-  }
-  Serial.println();
-}
+  HttpClient https(tcSecureClient, host, port);
 
-void gettest() {
-  const char *host = "iott.mypressonline.com";
-  const char *path = "/magicos.bin";
-  int port = 80;
+  Serial.println(
+      "\nHTTPS: Requesting https://jsonplaceholder.typicode.com/todos/1 ...");
 
-  Serial.println("\n--- Starting ArduinoHttpClient GET Request ---");
-
-  // Silence AT logs during transfer for cleaner output
-  modem.setDebug(nullptr);
-
-  QuectelClient qClient(modem);
-  HttpClient http(qClient, host, port);
-
-  int err = http.get(path);
+  int err = https.get("/todos/1");
   if (err == 0) {
-    int statusCode = http.responseStatusCode();
-    Serial.print("HTTP Status Code: ");
-    Serial.println(statusCode);
+    int status = https.responseStatusCode();
+    Serial.print("HTTPS Status Code: ");
+    Serial.println(status);
 
-    // Skip headers and read body
-    // Using streaming read because 1.9MB is too large for RAM
-    Serial.println("Reading Body:");
-    unsigned long timeout = millis();
-    uint32_t totalRead = 0;
+    if (status >= 0) {
+      https.skipResponseHeaders();
 
-    while (http.connected() || http.available()) {
-      if (http.available()) {
-        char c = http.read();
-        Serial.print(c);
-        totalRead++;
-        timeout = millis();
+      Serial.println("HTTPS Response Body:");
+      while (https.available() || https.connected()) {
+        if (https.available()) {
+          char c = https.read();
+          Serial.print(c);
+        }
       }
-      if (millis() - timeout > 10000) {
-        Serial.println("\nHTTP Timeout!");
-        break;
-      }
+      Serial.println("\n--- Request Finished ---");
     }
-    Serial.printf("\n--- HTTP Request Finished. Read %u bytes ---\n",
-                  totalRead);
   } else {
-    Serial.print("HTTP Client GET failed: ");
+    Serial.print("HTTPS GET failed error code: ");
     Serial.println(err);
   }
 
-  modem.setDebug(&Serial); // Re-enable debug
+  https.stop();
+}
+
+void loop() {
+  // Blink LED to show we are alive
+  static unsigned long lastBlink = 0;
+  if (millis() - lastBlink >= 1000) {
+    lastBlink = millis();
+    digitalWrite(2, !digitalRead(2));
+  }
 }
